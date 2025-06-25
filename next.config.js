@@ -19,14 +19,5 @@ module.exports = {
         ]
       }
     ];
-  },
-
-  async rewrites() {
-    return [
-      {
-        source: "/api/events",
-        destination: "/api/events/index.js"
-      }
-    ];
   }
 };
