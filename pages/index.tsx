@@ -19,7 +19,8 @@ export default function Home() {
       custom_data: {
         diagnostic_mode: true,
         triggered_by: "manual_test",
-      },
+        external_id: "test_user_123"
+      }
     };
 
     try {
