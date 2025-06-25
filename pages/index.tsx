@@ -16,10 +16,14 @@ export default function Home() {
       event_time: Math.floor(Date.now() / 1000),
       action_source: "website",
       event_source_url: "https://www.digitalpaisagismo.online",
+      user_data: {
+        external_id: "dec28dba1ef8f7a974d0daa5fb417e886d608ff870dea037176fafd3ef931045",
+        client_ip_address: "123.123.123.123",
+        client_user_agent: navigator.userAgent
+      },
       custom_data: {
         diagnostic_mode: true,
-        triggered_by: "manual_test",
-        external_id: "test_user_123"
+        triggered_by: "manual_test"
       }
     };
 
@@ -27,7 +31,7 @@ export default function Home() {
       const res = await fetch("/api/events", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data: [event] }),
+        body: JSON.stringify({ data: [event] })
       });
 
       const json = await res.json();
