@@ -1,12 +1,9 @@
 {
   "version": 2,
-  "builds": [
-    { "src": "api/events/index.js", "use": "@vercel/node" }
-  ],
   "routes": [
     {
       "src": "/api/events",
-      "dest": "api/events/index.js"
+      "dest": "/api/events.ts"
     }
   ]
 }
