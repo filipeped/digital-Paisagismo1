@@ -4,9 +4,6 @@
     { "src": "pages/api/events.ts", "use": "@vercel/node" }
   ],
   "routes": [
-    {
-      "src": "/api/events",
-      "dest": "pages/api/events.ts"
-    }
+    { "src": "/api/events", "dest": "/api/events" }
   ]
 }
