@@ -1,158 +1,125 @@
-import type { NextApiRequest, NextApiResponse } from "next";
-import crypto from "crypto";
+import { useEffect, useState } from "react";
 
-// Defina o domínio permitido para CORS
-const ALLOWED_ORIGIN = "https://www.digitalpaisagismo.com.br";
-
-// Use variáveis de ambiente para segurança
-const PIXEL_ID = process.env.FB_PIXEL_ID || "2528271940857156";
-const ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN || "EAAQfmxkTTZCcBPJ0w6gByvnfatW0caXRcpI5j74zPZCZArvcFT7ZA0zmO7zoTJJW64IVeoC3Ed9svVIuS8AGY1SaqzZAvmRPSiNoZAocY20EJFbRePZArXCnqy7wEe8adFd3abkmLxZBbv5X6M78QwnWoR73XTilfDu68b99QWt3KJBgS8HMWtCfZAQ7DdZCeZAIgZDZD";
-
-// Função para gerar hash SHA256
-function hashData(data: string): string {
-  return crypto.createHash('sha256').update(data.toLowerCase().trim()).digest('hex');
+// Função utilitária para gerar event_id único
+function generateEventId() {
+  return "evt_" + Date.now() + "_" + Math.random().toString(36).substring(2, 10);
 }
 
-// ✅ 2. Função para verificar se já está hashado
-function isSha256(value: string): boolean {
-  return /^[a-f0-9]{64}$/.test(value);
+// Função utilitária para capturar cookies do navegador
+function getCookie(name) {
+  const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
+  return match ? match[2] : "";
 }
 
-// ✅ 2. Função para hash apenas se necessário
-function hashIfNeeded(value: string): string {
-  return isSha256(value) ? value : hashData(value);
+// Função utilitária para gerar external_id hash SHA-256 (apenas exemplo, use backend para dados reais)
+async function hashSHA256(value) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(value.trim().toLowerCase());
+  const hashBuffer = await window.crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-// Função para gerar event_id único
-function generateEventId(): string {
-  return `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-}
+export default function Home() {
+  const [status, setStatus] = useState("⏳ Enviando evento de teste...");
+  const [responseData, setResponseData] = useState(null);
+  const [timestamp, setTimestamp] = useState("");
 
-// Função para processar user_data com hash inteligente
-function processUserData(userData: any): any {
-  const processed: any = {};
+  const sendTestEvent = async () => {
+    const now = new Date();
+    setTimestamp(now.toLocaleString("pt-BR"));
+    setStatus("⏳ Enviando evento de teste...");
 
-  // ✅ 2. Hash de email apenas se necessário
-  if (userData.em) {
-    processed.em = hashIfNeeded(userData.em);
-  }
+    // Exemplo: use o email do usuário, se disponível, para gerar o external_id
+    const userEmail = "usuario@exemplo.com"; // Troque para um valor real se possível
+    const externalId = await hashSHA256(userEmail);
 
-  // ✅ 2. Hash de telefone apenas se necessário
-  if (userData.ph) {
-    processed.ph = hashIfNeeded(userData.ph);
-  }
-
-  // ✅ 2. Hash de external_id apenas se necessário
-  if (userData.external_id) {
-    processed.external_id = hashIfNeeded(userData.external_id);
-  }
-
-  // Manter outros campos como estão
-  if (userData.fn) processed.fn = userData.fn;
-  if (userData.ln) processed.ln = userData.ln;
-  if (userData.ct) processed.ct = userData.ct;
-  if (userData.st) processed.st = userData.st;
-  if (userData.country) processed.country = userData.country;
-  if (userData.zip) processed.zip = userData.zip;
-
-  return processed;
-}
-
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // Configura CORS
-  res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Fb-Pixel-Id, X-Fb-Event-Source");
-
-  // Pré-voo CORS
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
-
-  // Só aceita POST
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method Not Allowed" });
-  }
-
-  try {
-    const { data } = req.body;
-
-    // Validação do payload
-    if (!data || !Array.isArray(data)) {
-      return res.status(400).json({ error: "Payload inválido - campo 'data' deve ser um array" });
-    }
-
-    // Processa cada evento individualmente
-    const processedData = data.map((event: any) => {
-      // ✅ 3. Adiciona action_source se não presente
-      if (!event.action_source) {
-        event.action_source = "website";
+    const event = {
+      event_name: "TestEvent",
+      event_time: Math.floor(Date.now() / 1000),
+      event_id: generateEventId(),
+      action_source: "website",
+      event_source_url: window.location.href,
+      user_data: {
+        external_id: externalId,
+        client_ip_address: "auto", // O backend deve sobrescrever pelo IP real do request
+        client_user_agent: navigator.userAgent,
+        fbp: getCookie("_fbp"),
+        fbc: getCookie("_fbc")
+      },
+      custom_data: {
+        diagnostic_mode: true,
+        triggered_by: "manual_test",
+        value: 1850,
+        currency: "BRL"
       }
-
-      // ✅ 3. Adiciona event_source_url se não presente
-      if (!event.event_source_url) {
-        event.event_source_url = ALLOWED_ORIGIN;
-      }
-
-      // ✅ 2. Adiciona event_id com deduplicação se não presente
-      if (!event.event_id) {
-        event.event_id = generateEventId();
-      }
-
-      // ✅ 3. Processa user_data com hash inteligente
-      if (event.user_data) {
-        event.user_data = processUserData(event.user_data);
-      }
-
-      // ✅ 1. Persistência inteligente do external_id por sessão
-      if (!event.user_data?.external_id) {
-        if (!event.user_data) event.user_data = {};
-        const sessionId = req.headers["cookie"]?.match(/session_id=([^;]+)/)?.[1] || generateEventId();
-        event.user_data.external_id = hashData(sessionId);
-      }
-
-      // ✅ 4. Adiciona fbp e fbc se disponíveis nos cookies
-      const cookies = req.headers.cookie || '';
-      const fbpMatch = cookies.match(/fbp=([^;]+)/);
-      const fbcMatch = cookies.match(/fbc=([^;]+)/);
-
-      if (fbpMatch && !event.user_data?.fbp) {
-        if (!event.user_data) event.user_data = {};
-        event.user_data.fbp = fbpMatch[1];
-      }
-
-      if (fbcMatch && !event.user_data?.fbc) {
-        if (!event.user_data) event.user_data = {};
-        event.user_data.fbc = fbcMatch[1];
-      }
-
-      return event;
-    });
-
-    // ✅ CORREÇÃO CRÍTICA: Monta o payload final para o Facebook
-    // client_user_agent e client_ip_address FORA do user_data, no payload principal
-    const payload = {
-      data: processedData,
-      client_user_agent: req.headers["user-agent"],
-      client_ip_address: req.headers["x-forwarded-for"] || req.connection.remoteAddress
     };
 
-    // Envia para o Facebook CAPI
-    const fbResponse = await fetch(
-      `https://graph.facebook.com/v19.0/${PIXEL_ID}/events?access_token=${ACCESS_TOKEN}`,
-      {
+    try {
+      const res = await fetch("/api/events", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          data: [event],
+          pixel_id: "1288254999387848",
+          access_token: "EAAQfmxkTTZCcBPGq9eYbjjEizIShrgEHNng25xnFw5nBDvQsgjMHa5AF9LmPJjBhLAsrnnZCI61UYucOpESRRQ22i7YZC9ZCWfqzruQZCNgcuH9brof0GBv7nELfzq0NBve9iTZCyvmRDG5fgaRFWa5byUybdeyjjmhY1Ap3kUNTRs6vz6FDq0Bb8JqtvmdwZDZD"
+        })
+      });
+
+      const json = await res.json();
+      setResponseData(json);
+
+      if (json.events_received) {
+        setStatus("✅ Evento recebido com sucesso pela Meta via proxy.");
+      } else if (json.error) {
+        setStatus("❌ Erro retornado pela Meta.");
+      } else {
+        setStatus("⚠️ Evento enviado, mas sem confirmação clara da Meta.");
       }
-    );
+    } catch (err) {
+      console.error(err);
+      setStatus("❌ Erro na conexão com o proxy.");
+    }
+  };
 
-    const result = await fbResponse.json();
+  useEffect(() => {
+    sendTestEvent();
+    // eslint-disable-next-line
+  }, []);
 
-    // Retorna o status e resposta do Facebook
-    return res.status(fbResponse.status).json(result);
-  } catch (err) {
-    console.error("❌ Erro no Proxy CAPI:", err);
-    return res.status(500).json({ error: "Erro interno no servidor do proxy CAPI." });
-  }
+  return (
+    <div style={{ fontFamily: "sans-serif", padding: "40px", maxWidth: "800px", margin: "0 auto" }}>
+      <h2>🔍 Diagnóstico do Proxy CAPI</h2>
+      <p><strong>Status:</strong> {status}</p>
+      <p><strong>Horário:</strong> {timestamp}</p>
+
+      <button
+        onClick={sendTestEvent}
+        style={{
+          padding: "10px 20px",
+          marginTop: "20px",
+          backgroundColor: "#0070f3",
+          color: "white",
+          border: "none",
+          borderRadius: "4px",
+          cursor: "pointer"
+        }}
+      >
+        🔄 Reenviar evento de teste
+      </button>
+
+      <h3 style={{ marginTop: "30px" }}>📦 Resposta completa:</h3>
+      <pre
+        style={{
+          backgroundColor: "#f4f4f4",
+          padding: "20px",
+          borderRadius: "8px",
+          maxHeight: "400px",
+          overflowY: "auto",
+          fontSize: "14px"
+        }}
+      >
+        {responseData ? JSON.stringify(responseData, null, 2) : "Aguardando resposta..."}
+      </pre>
+    </div>
+  );
 }
