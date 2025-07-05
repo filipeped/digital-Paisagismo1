@@ -1,12 +1,12 @@
-// ✅ Código final para teste de envio via CAPI (Meta) com todos os parâmetros e segurança
+// ✅ Código atualizado para teste completo com CAPI via proxy Meta com segurança e deduplicação
 import { useEffect, useState } from "react";
 
-// Gera um event_id único por evento
+// Gera um event_id único
 function generateEventId() {
   return "evt_" + Date.now() + "_" + Math.random().toString(36).substring(2, 10);
 }
 
-// Componente principal
+// Função principal do componente
 export default function Home() {
   const [status, setStatus] = useState("⏳ Enviando evento de teste...");
   const [responseData, setResponseData] = useState<any>(null);
@@ -14,8 +14,7 @@ export default function Home() {
 
   const sendTestEvent = async () => {
     const now = new Date();
-    const formatted = now.toLocaleString("pt-BR");
-    setTimestamp(formatted);
+    setTimestamp(now.toLocaleString("pt-BR"));
     setStatus("⏳ Enviando evento de teste...");
 
     const event = {
@@ -23,7 +22,7 @@ export default function Home() {
       event_time: Math.floor(Date.now() / 1000),
       event_id: generateEventId(),
       action_source: "website",
-      event_source_url: "https://www.digitalpaisagismo.com.br",
+      event_source_url: window.location.href,
       user_data: {
         external_id: "dec28dba1ef8f7a974d0daa5fb417e886d608ff870dea037176fafd3ef931045",
         client_ip_address: "123.123.123.123",
@@ -58,53 +57,4 @@ export default function Home() {
       } else if (json.error) {
         setStatus("❌ Erro retornado pela Meta.");
       } else {
-        setStatus("⚠️ Evento enviado, mas sem confirmação clara da Meta.");
-      }
-    } catch (err) {
-      console.error(err);
-      setStatus("❌ Erro na conexão com o proxy.");
-    }
-  };
-
-  useEffect(() => {
-    sendTestEvent();
-  }, []);
-
-  return (
-    <div style={{ fontFamily: "sans-serif", padding: "40px", maxWidth: "800px", margin: "0 auto" }}>
-      <h2>🔍 Diagnóstico do Proxy CAPI</h2>
-      <p><strong>Status:</strong> {status}</p>
-      <p><strong>Horário:</strong> {timestamp}</p>
-
-      <button
-        onClick={sendTestEvent}
-        style={{
-          padding: "10px 20px",
-          marginTop: "20px",
-          backgroundColor: "#0070f3",
-          color: "white",
-          border: "none",
-          borderRadius: "4px",
-          cursor: "pointer"
-        }}
-        aria-label="Reenviar evento de teste"
-      >
-        🔄 Reenviar evento de teste
-      </button>
-
-      <h3 style={{ marginTop: "30px" }}>📦 Resposta completa:</h3>
-      <pre
-        style={{
-          backgroundColor: "#f4f4f4",
-          padding: "20px",
-          borderRadius: "8px",
-          maxHeight: "400px",
-          overflowY: "auto",
-          fontSize: "14px"
-        }}
-      >
-        {responseData ? JSON.stringify(responseData, null, 2) : "Aguardando resposta..."}
-      </pre>
-    </div>
-  );
-}
+        setStatus("⚠️
