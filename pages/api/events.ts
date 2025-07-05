@@ -1,17 +1,17 @@
 import { useEffect, useState } from "react";
 
-// Função utilitária para gerar event_id único
+// Gera um event_id único para deduplicação
 function generateEventId() {
   return "evt_" + Date.now() + "_" + Math.random().toString(36).substring(2, 10);
 }
 
-// Função utilitária para capturar cookies do navegador
+// Captura o valor de um cookie pelo nome
 function getCookie(name) {
   const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
   return match ? match[2] : "";
 }
 
-// Função utilitária para gerar external_id hash SHA-256 (apenas exemplo, use backend para dados reais)
+// Gera um hash SHA-256 (apenas para teste, ideal é fazer no backend em produção)
 async function hashSHA256(value) {
   const encoder = new TextEncoder();
   const data = encoder.encode(value.trim().toLowerCase());
@@ -24,13 +24,13 @@ export default function Home() {
   const [responseData, setResponseData] = useState(null);
   const [timestamp, setTimestamp] = useState("");
 
+  // Função para enviar o evento de teste
   const sendTestEvent = async () => {
-    const now = new Date();
-    setTimestamp(now.toLocaleString("pt-BR"));
     setStatus("⏳ Enviando evento de teste...");
+    setTimestamp(new Date().toLocaleString("pt-BR"));
 
-    // Exemplo: use o email do usuário, se disponível, para gerar o external_id
-    const userEmail = "usuario@exemplo.com"; // Troque para um valor real se possível
+    // Troque para um identificador real do usuário em produção!
+    const userEmail = "usuario@exemplo.com";
     const externalId = await hashSHA256(userEmail);
 
     const event = {
@@ -43,8 +43,8 @@ export default function Home() {
         external_id: externalId,
         client_ip_address: "auto", // O backend deve sobrescrever pelo IP real do request
         client_user_agent: navigator.userAgent,
-        fbp: getCookie("_fbp"),
-        fbc: getCookie("_fbc")
+        fbp: getCookie("_fbp") || "",
+        fbc: getCookie("_fbc") || ""
       },
       custom_data: {
         diagnostic_mode: true,
@@ -103,6 +103,7 @@ export default function Home() {
           borderRadius: "4px",
           cursor: "pointer"
         }}
+        aria-label="Reenviar evento de teste"
       >
         🔄 Reenviar evento de teste
       </button>
