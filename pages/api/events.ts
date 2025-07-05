@@ -1,47 +1,8 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { z } from "zod";
 import zlib from "zlib";
 import https from "https";
 import fs from "fs";
 import path from "path";
-
-const customDataSchema = z.object({
-  value: z.number().optional(),
-  currency: z.string().length(3).optional(),
-  content_name: z.string().optional(),
-  content_category: z.string().optional(),
-});
-
-const userDataSchema = z.object({
-  client_ip_address: z.string().optional(),
-  client_user_agent: z.string().optional(),
-  fbp: z.string().optional(),
-  fbc: z.string().optional(),
-  external_id: z.array(z.string()).optional(),
-  em: z.array(z.string()).optional(),
-  ph: z.array(z.string()).optional(),
-  fn: z.array(z.string()).optional(),
-  ln: z.array(z.string()).optional(),
-  ge: z.array(z.string()).optional(),
-  db: z.array(z.string()).optional(),
-  ct: z.array(z.string()).optional(),
-  st: z.array(z.string()).optional(),
-  zp: z.array(z.string()).optional(),
-});
-
-const eventSchema = z.object({
-  event_id: z.string(),
-  event_name: z.string(),
-  event_time: z.number(),
-  user_data: userDataSchema,
-  custom_data: customDataSchema.optional(),
-});
-
-const payloadSchema = z.object({
-  data: z.array(eventSchema).min(1).max(20),
-  pixel_id: z.string().optional(),
-  test_event_code: z.string().optional(),
-});
 
 const RATE_LIMIT = 30;
 const rateLimitMap = new Map();
@@ -91,13 +52,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!rateLimit(ip)) return res.status(429).json({ error: "Limite de requisições excedido. Tente novamente em instantes." });
 
   try {
-    const parseResult = payloadSchema.safeParse(req.body);
-    if (!parseResult.success) {
-      log("error", parseResult.error);
-      return res.status(400).json({ error: "Payload inválido", details: parseResult.error.errors });
+    const { data, pixel_id, test_event_code } = req.body;
+    if (!Array.isArray(data) || data.length === 0 || data.length > 20) {
+      return res.status(400).json({ error: "Payload inválido" });
     }
 
-    const { data, pixel_id, test_event_code } = parseResult.data;
     const pixelId = pixel_id || "1288254999387848";
     const accessToken = process.env.META_ACCESS_TOKEN;
     const seenEventIds = new Set();
