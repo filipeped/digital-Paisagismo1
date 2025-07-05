@@ -1,6 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import zlib from "zlib";
-import https from "https";
 import fs from "fs";
 import path from "path";
 
@@ -23,7 +22,6 @@ async function saveFailedEvent(event: any) {
   fs.appendFileSync(failedEventsFile, JSON.stringify(failed) + "\n");
 }
 
-const agent = new https.Agent({ keepAlive: true });
 function log(level: string, message: any) {
   if (process.env.NODE_ENV !== "production") {
     console.log(`[${new Date().toISOString()}] [${level}]`, message);
@@ -97,7 +95,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         headers,
         body,
         signal: controller.signal,
-        agent,
       });
       clearTimeout(timeout);
       const json = await response.json();
