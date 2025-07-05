@@ -1,8 +1,12 @@
-// ✅ Prompt atualizado para teste completo com Pixel + Token via proxy CAPI
-
+// ✅ Código final para teste de envio via CAPI (Meta) com todos os parâmetros e segurança
 import { useEffect, useState } from "react";
 
-// Função de componente principal
+// Gera um event_id único por evento
+function generateEventId() {
+  return "evt_" + Date.now() + "_" + Math.random().toString(36).substring(2, 10);
+}
+
+// Componente principal
 export default function Home() {
   const [status, setStatus] = useState("⏳ Enviando evento de teste...");
   const [responseData, setResponseData] = useState<any>(null);
@@ -10,13 +14,14 @@ export default function Home() {
 
   const sendTestEvent = async () => {
     const now = new Date();
-    const timeFormatted = now.toLocaleString("pt-BR");
-    setTimestamp(timeFormatted);
+    const formatted = now.toLocaleString("pt-BR");
+    setTimestamp(formatted);
     setStatus("⏳ Enviando evento de teste...");
 
     const event = {
       event_name: "TestEvent",
       event_time: Math.floor(Date.now() / 1000),
+      event_id: generateEventId(),
       action_source: "website",
       event_source_url: "https://www.digitalpaisagismo.com.br",
       user_data: {
@@ -82,6 +87,7 @@ export default function Home() {
           borderRadius: "4px",
           cursor: "pointer"
         }}
+        aria-label="Reenviar evento de teste"
       >
         🔄 Reenviar evento de teste
       </button>
