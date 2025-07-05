@@ -3,11 +3,12 @@ import zlib from "zlib";
 
 const RATE_LIMIT = 30;
 const rateLimitMap = new Map();
+
 function rateLimit(ip: string): boolean {
   const now = Date.now();
   const windowMs = 60 * 1000;
   if (!rateLimitMap.has(ip)) rateLimitMap.set(ip, []);
-  const timestamps = rateLimitMap.get(ip).filter((t: number) => now - t < windowMs);
+  const timestamps = rateLimitMap.get(ip)!.filter((t: number) => now - t < windowMs);
   if (timestamps.length >= RATE_LIMIT) return false;
   timestamps.push(now);
   rateLimitMap.set(ip, timestamps);
@@ -35,11 +36,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "no-referrer");
+
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Método não permitido" });
 
   const ip = req.headers["x-forwarded-for"]?.toString() || req.socket.remoteAddress || "unknown";
-  if (!rateLimit(ip)) return res.status(429).json({ error: "Limite de requisições excedido. Tente novamente em instantes." });
+  if (!rateLimit(ip)) return res.status(429).json({ error: "Limite de requisições excedido" });
 
   try {
     const { data, pixel_id, test_event_code } = req.body;
@@ -62,8 +64,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!event.user_data.fbp && req.cookies?._fbp) event.user_data.fbp = req.cookies._fbp;
       if (!event.user_data.fbc && req.cookies?._fbc) event.user_data.fbc = req.cookies._fbc;
       if (!event.event_source_url && req.headers.referer) event.event_source_url = req.headers.referer;
-      event.action_source = "website";
 
+      event.action_source = "website";
       event.user_data = cleanObject(event.user_data);
       event.custom_data = cleanObject(event.custom_data || {});
     });
@@ -75,6 +77,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const payload = JSON.stringify({ data, ...(test_event_code && { test_event_code }) });
     const shouldCompress = Buffer.byteLength(payload) > 2048;
     const body: Buffer | string = shouldCompress ? zlib.gzipSync(payload) : payload;
+
     const headers: any = {
       "Content-Type": "application/json",
       "Connection": "keep-alive",
@@ -108,3 +111,4 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(500).json({ error: "Erro inesperado ao enviar evento para a Meta" });
   }
 }
+
