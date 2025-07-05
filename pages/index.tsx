@@ -1,5 +1,8 @@
+// ✅ Prompt atualizado para teste completo com Pixel + Token via proxy CAPI
+
 import { useEffect, useState } from "react";
 
+// Função de componente principal
 export default function Home() {
   const [status, setStatus] = useState("⏳ Enviando evento de teste...");
   const [responseData, setResponseData] = useState<any>(null);
@@ -15,13 +18,13 @@ export default function Home() {
       event_name: "TestEvent",
       event_time: Math.floor(Date.now() / 1000),
       action_source: "website",
-      event_source_url: "https://www.digitalpaisagismo.com.br", // atualizado
+      event_source_url: "https://www.digitalpaisagismo.com.br",
       user_data: {
         external_id: "dec28dba1ef8f7a974d0daa5fb417e886d608ff870dea037176fafd3ef931045",
         client_ip_address: "123.123.123.123",
         client_user_agent: navigator.userAgent,
-        fbp: "fb.1.1751360590432.213448171908285443", // opcional para teste completo
-        fbc: "fb.1.1751360590432.Ix7qN8DF" // opcional para teste completo
+        fbp: "fb.1.1751360590432.213448171908285443",
+        fbc: "fb.1.1751360590432.Ix7qN8DF"
       },
       custom_data: {
         diagnostic_mode: true,
@@ -35,7 +38,11 @@ export default function Home() {
       const res = await fetch("/api/events", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data: [event] })
+        body: JSON.stringify({
+          data: [event],
+          pixel_id: "1288254999387848",
+          access_token: "EAAQfmxkTTZCcBPGq9eYbjjEizIShrgEHNng25xnFw5nBDvQsgjMHa5AF9LmPJjBhLAsrnnZCI61UYucOpESRRQ22i7YZC9ZCWfqzruQZCNgcuH9brof0GBv7nELfzq0NBve9iTZCyvmRDG5fgaRFWa5byUybdeyjjmhY1Ap3kUNTRs6vz6FDq0Bb8JqtvmdwZDZD"
+        })
       });
 
       const json = await res.json();
