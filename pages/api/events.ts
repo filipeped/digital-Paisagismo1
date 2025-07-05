@@ -1,7 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import zlib from "zlib";
-import fs from "fs";
-import path from "path";
 
 const RATE_LIMIT = 30;
 const rateLimitMap = new Map();
@@ -14,12 +12,6 @@ function rateLimit(ip: string): boolean {
   timestamps.push(now);
   rateLimitMap.set(ip, timestamps);
   return true;
-}
-
-const failedEventsFile = path.join(process.cwd(), "failed-events.log");
-async function saveFailedEvent(event: any) {
-  const failed = { ...event, failedAt: new Date().toISOString() };
-  fs.appendFileSync(failedEventsFile, JSON.stringify(failed) + "\n");
 }
 
 function log(level: string, message: any) {
@@ -100,7 +92,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const json = await response.json();
 
       if (!response.ok) {
-        await saveFailedEvent({ data, error: json });
         log("error", json);
         return res.status(response.status).json({ error: "Erro da Meta", details: json });
       }
@@ -109,12 +100,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       res.status(200).json(json);
     } catch (error: any) {
       clearTimeout(timeout);
-      await saveFailedEvent({ data, error: error.message });
       log("error", error.message);
       return res.status(500).json({ error: "Erro ao enviar evento para a Meta" });
     }
   } catch (error) {
-    await saveFailedEvent({ error: "unexpected_error", details: error });
     log("error", error);
     res.status(500).json({ error: "Erro inesperado ao enviar evento para a Meta" });
   }
