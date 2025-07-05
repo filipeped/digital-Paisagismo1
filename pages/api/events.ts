@@ -1,127 +1,165 @@
-import { useEffect, useState } from "react";
+import type { NextApiRequest, NextApiResponse } from "next";
+import { z } from "zod";
+import zlib from "zlib";
+import https from "https";
+import fs from "fs";
+import path from "path";
 
-// Gera um event_id único para deduplicação
-function generateEventId() {
-  return "evt_" + Date.now() + "_" + Math.random().toString(36).substring(2, 10);
+const customDataSchema = z.object({
+  value: z.number().optional(),
+  currency: z.string().length(3).optional(),
+  content_name: z.string().optional(),
+  content_category: z.string().optional(),
+});
+
+const userDataSchema = z.object({
+  client_ip_address: z.string().optional(),
+  client_user_agent: z.string().optional(),
+  fbp: z.string().optional(),
+  fbc: z.string().optional(),
+  external_id: z.array(z.string()).optional(),
+  em: z.array(z.string()).optional(),
+  ph: z.array(z.string()).optional(),
+  fn: z.array(z.string()).optional(),
+  ln: z.array(z.string()).optional(),
+  ge: z.array(z.string()).optional(),
+  db: z.array(z.string()).optional(),
+  ct: z.array(z.string()).optional(),
+  st: z.array(z.string()).optional(),
+  zp: z.array(z.string()).optional(),
+});
+
+const eventSchema = z.object({
+  event_id: z.string(),
+  event_name: z.string(),
+  event_time: z.number(),
+  user_data: userDataSchema,
+  custom_data: customDataSchema.optional(),
+});
+
+const payloadSchema = z.object({
+  data: z.array(eventSchema).min(1).max(20),
+  pixel_id: z.string().optional(),
+  test_event_code: z.string().optional(),
+});
+
+const RATE_LIMIT = 30;
+const rateLimitMap = new Map();
+function rateLimit(ip: string): boolean {
+  const now = Date.now();
+  const windowMs = 60 * 1000;
+  if (!rateLimitMap.has(ip)) rateLimitMap.set(ip, []);
+  const timestamps = rateLimitMap.get(ip).filter((t: number) => now - t < windowMs);
+  if (timestamps.length >= RATE_LIMIT) return false;
+  timestamps.push(now);
+  rateLimitMap.set(ip, timestamps);
+  return true;
 }
 
-// Captura o valor de um cookie pelo nome
-function getCookie(name) {
-  const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
-  return match ? match[2] : "";
+const failedEventsFile = path.join(process.cwd(), "failed-events.log");
+async function saveFailedEvent(event: any) {
+  const failed = { ...event, failedAt: new Date().toISOString() };
+  fs.appendFileSync(failedEventsFile, JSON.stringify(failed) + "\n");
 }
 
-// Gera um hash SHA-256 (apenas para teste, ideal é fazer no backend em produção)
-async function hashSHA256(value) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(value.trim().toLowerCase());
-  const hashBuffer = await window.crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
+const agent = new https.Agent({ keepAlive: true });
+function log(level: string, message: any) {
+  if (process.env.NODE_ENV !== "production") {
+    console.log(`[${new Date().toISOString()}] [${level}]`, message);
+  }
 }
 
-export default function Home() {
-  const [status, setStatus] = useState("⏳ Enviando evento de teste...");
-  const [responseData, setResponseData] = useState(null);
-  const [timestamp, setTimestamp] = useState("");
+function cleanObject(obj: Record<string, any>) {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([_, v]) =>
+      Array.isArray(v) ? v.filter(Boolean).length > 0 : v !== undefined && v !== null && v !== ""
+    )
+  );
+}
 
-  // Função para enviar o evento de teste
-  const sendTestEvent = async () => {
-    setStatus("⏳ Enviando evento de teste...");
-    setTimestamp(new Date().toLocaleString("pt-BR"));
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  res.setHeader("Access-Control-Allow-Origin", "https://www.digitalpaisagismo.com.br");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "Método não permitido" });
 
-    // Troque para um identificador real do usuário em produção!
-    const userEmail = "usuario@exemplo.com";
-    const externalId = await hashSHA256(userEmail);
+  const ip = req.headers["x-forwarded-for"]?.toString() || req.socket.remoteAddress || "unknown";
+  if (!rateLimit(ip)) return res.status(429).json({ error: "Limite de requisições excedido. Tente novamente em instantes." });
 
-    const event = {
-      event_name: "TestEvent",
-      event_time: Math.floor(Date.now() / 1000),
-      event_id: generateEventId(),
-      action_source: "website",
-      event_source_url: window.location.href,
-      user_data: {
-        external_id: externalId,
-        client_ip_address: "auto", // O backend deve sobrescrever pelo IP real do request
-        client_user_agent: navigator.userAgent,
-        fbp: getCookie("_fbp") || "",
-        fbc: getCookie("_fbc") || ""
-      },
-      custom_data: {
-        diagnostic_mode: true,
-        triggered_by: "manual_test",
-        value: 1850,
-        currency: "BRL"
-      }
+  try {
+    const parseResult = payloadSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      log("error", parseResult.error);
+      return res.status(400).json({ error: "Payload inválido", details: parseResult.error.errors });
+    }
+
+    const { data, pixel_id, test_event_code } = parseResult.data;
+    const pixelId = pixel_id || "1288254999387848";
+    const accessToken = process.env.META_ACCESS_TOKEN;
+    const seenEventIds = new Set();
+
+    data.forEach((event: any) => {
+      if (!event.event_id) event.event_id = "evt_" + Date.now() + "_" + Math.random().toString(36).substring(2, 10);
+      if (seenEventIds.has(event.event_id)) return;
+      seenEventIds.add(event.event_id);
+
+      if (!event.user_data) event.user_data = {};
+      if (!event.user_data.client_ip_address) event.user_data.client_ip_address = ip;
+      if (!event.user_data.client_user_agent) event.user_data.client_user_agent = req.headers["user-agent"] || "";
+      if (!event.user_data.fbp && req.cookies?._fbp) event.user_data.fbp = req.cookies._fbp;
+      if (!event.user_data.fbc && req.cookies?._fbc) event.user_data.fbc = req.cookies._fbc;
+      if (!event.event_source_url && req.headers.referer) event.event_source_url = req.headers.referer;
+      event.action_source = "website";
+
+      event.user_data = cleanObject(event.user_data);
+      event.custom_data = cleanObject(event.custom_data || {});
+    });
+
+    const controller = new AbortController();
+    const timeoutMs = parseInt(process.env.CAPI_TIMEOUT_MS || "8000", 10);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    const payload = JSON.stringify({ data, ...(test_event_code && { test_event_code }) });
+    const shouldCompress = Buffer.byteLength(payload) > 2048;
+    const body: Buffer | string = shouldCompress ? zlib.gzipSync(payload) : payload;
+    const headers: any = {
+      "Content-Type": "application/json",
+      "Connection": "keep-alive",
+      ...(shouldCompress && { "Content-Encoding": "gzip" }),
     };
 
     try {
-      const res = await fetch("/api/events", {
+      const response = await fetch(`https://graph.facebook.com/v18.0/${pixelId}/events?access_token=${accessToken}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          data: [event],
-          pixel_id: "1288254999387848",
-          access_token: "EAAQfmxkTTZCcBPGq9eYbjjEizIShrgEHNng25xnFw5nBDvQsgjMHa5AF9LmPJjBhLAsrnnZCI61UYucOpESRRQ22i7YZC9ZCWfqzruQZCNgcuH9brof0GBv7nELfzq0NBve9iTZCyvmRDG5fgaRFWa5byUybdeyjjmhY1Ap3kUNTRs6vz6FDq0Bb8JqtvmdwZDZD"
-        })
+        headers,
+        body,
+        signal: controller.signal,
+        agent,
       });
+      clearTimeout(timeout);
+      const json = await response.json();
 
-      const json = await res.json();
-      setResponseData(json);
-
-      if (json.events_received) {
-        setStatus("✅ Evento recebido com sucesso pela Meta via proxy.");
-      } else if (json.error) {
-        setStatus("❌ Erro retornado pela Meta.");
-      } else {
-        setStatus("⚠️ Evento enviado, mas sem confirmação clara da Meta.");
+      if (!response.ok) {
+        await saveFailedEvent({ data, error: json });
+        log("error", json);
+        return res.status(response.status).json({ error: "Erro da Meta", details: json });
       }
-    } catch (err) {
-      console.error(err);
-      setStatus("❌ Erro na conexão com o proxy.");
+
+      log("info", json);
+      res.status(200).json(json);
+    } catch (error: any) {
+      clearTimeout(timeout);
+      await saveFailedEvent({ data, error: error.message });
+      log("error", error.message);
+      return res.status(500).json({ error: "Erro ao enviar evento para a Meta" });
     }
-  };
-
-  useEffect(() => {
-    sendTestEvent();
-    // eslint-disable-next-line
-  }, []);
-
-  return (
-    <div style={{ fontFamily: "sans-serif", padding: "40px", maxWidth: "800px", margin: "0 auto" }}>
-      <h2>🔍 Diagnóstico do Proxy CAPI</h2>
-      <p><strong>Status:</strong> {status}</p>
-      <p><strong>Horário:</strong> {timestamp}</p>
-
-      <button
-        onClick={sendTestEvent}
-        style={{
-          padding: "10px 20px",
-          marginTop: "20px",
-          backgroundColor: "#0070f3",
-          color: "white",
-          border: "none",
-          borderRadius: "4px",
-          cursor: "pointer"
-        }}
-        aria-label="Reenviar evento de teste"
-      >
-        🔄 Reenviar evento de teste
-      </button>
-
-      <h3 style={{ marginTop: "30px" }}>📦 Resposta completa:</h3>
-      <pre
-        style={{
-          backgroundColor: "#f4f4f4",
-          padding: "20px",
-          borderRadius: "8px",
-          maxHeight: "400px",
-          overflowY: "auto",
-          fontSize: "14px"
-        }}
-      >
-        {responseData ? JSON.stringify(responseData, null, 2) : "Aguardando resposta..."}
-      </pre>
-    </div>
-  );
+  } catch (error) {
+    await saveFailedEvent({ error: "unexpected_error", details: error });
+    log("error", error);
+    res.status(500).json({ error: "Erro inesperado ao enviar evento para a Meta" });
+  }
 }
- 
