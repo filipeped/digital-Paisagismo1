@@ -30,7 +30,7 @@ function cleanObject(obj: Record<string, any>) {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  res.setHeader("Access-Control-Allow-Origin", "https://www.digitalpaisagismo.com.br");
+  res.setHeader("Access-Control-Allow-Origin", "https://www.digitalpaisagismo.pro");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   res.setHeader("X-Content-Type-Options", "nosniff");
@@ -49,8 +49,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: "Payload inválido" });
     }
 
-    const pixelId = pixel_id || "1288254999387848";
-    const accessToken = process.env.META_ACCESS_TOKEN;
+    const pixelId = pixel_id || "735685568823270";
+    const accessToken = process.env.META_ACCESS_TOKEN || "EAAQfmxkTTZCcBOx7Rlh6wgZAQYHETf45wf5jknPwae98s3JgV6qZA4YAujlvMnFQE29MY0DWX3pJGeQx04XT0zDuuU7SegnCsCN0lK6LVil4yaelgI7CBPwVVFu4N8Gjl2vsUcvBAgtkPX3dlXtk4wlIeDm6C4XMvGeZBMjRPEZAd6Mpyiz5r2nuu8rcGHAZDZD";
     const seenEventIds = new Set();
 
     data.forEach((event: any) => {
@@ -111,4 +111,3 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(500).json({ error: "Erro inesperado ao enviar evento para a Meta" });
   }
 }
-
