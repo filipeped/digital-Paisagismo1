@@ -39,8 +39,8 @@ export default function Home() {
       action_source: "website",
       event_source_url: window.location.href,
       user_data: {
-        external_id: externalId,
-        client_ip_address: "auto", // backend sobrescreve
+        external_id: [externalId],
+        client_ip_address: "auto",
         client_user_agent: navigator.userAgent,
         fbp: getCookie("_fbp") || "",
         fbc: getCookie("_fbc") || "",
@@ -57,9 +57,7 @@ export default function Home() {
       const res = await fetch("/api/events", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          data: [event],
-        }),
+        body: JSON.stringify({ data: [event] }),
       });
 
       const json = await res.json();
@@ -85,12 +83,8 @@ export default function Home() {
   return (
     <div style={{ fontFamily: "sans-serif", padding: "40px", maxWidth: "800px", margin: "0 auto" }}>
       <h2>🔍 Diagnóstico do Proxy CAPI</h2>
-      <p>
-        <strong>Status:</strong> {status}
-      </p>
-      <p>
-        <strong>Horário:</strong> {timestamp}
-      </p>
+      <p><strong>Status:</strong> {status}</p>
+      <p><strong>Horário:</strong> {timestamp}</p>
 
       <button
         onClick={sendTestEvent}
