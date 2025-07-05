@@ -3,6 +3,7 @@ import zlib from "zlib";
 
 const RATE_LIMIT = 30;
 const rateLimitMap = new Map();
+
 function rateLimit(ip: string): boolean {
   const now = Date.now();
   const windowMs = 60 * 1000;
@@ -35,6 +36,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "no-referrer");
+
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Método não permitido" });
 
@@ -75,6 +77,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const payload = JSON.stringify({ data, ...(test_event_code && { test_event_code }) });
     const shouldCompress = Buffer.byteLength(payload) > 2048;
     const body: Buffer | string = shouldCompress ? zlib.gzipSync(payload) : payload;
+
     const headers: any = {
       "Content-Type": "application/json",
       "Connection": "keep-alive",
@@ -88,6 +91,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         body,
         signal: controller.signal,
       });
+
       clearTimeout(timeout);
       const json = await response.json();
 
