@@ -6,17 +6,15 @@ import path from "path";
 const RATE_LIMIT = 30;
 const rateLimitMap = new Map();
 
-// Domínios permitidos para CORS
 const ALLOWED_ORIGINS = [
   "https://www.digitalpaisagismo.com.br",
-  "http://localhost:3000" // Para desenvolvimento
+  "http://localhost:3000"
 ];
 
-// Validação de campos obrigatórios por tipo de evento
 const EVENT_VALIDATION = {
   Lead: {
     required: ["external_id"],
-    forbidden: [] // external_id é obrigatório apenas para Lead
+    forbidden: []
   },
   PageView: {
     required: [],
@@ -58,7 +56,7 @@ const EVENT_VALIDATION = {
 
 function rateLimit(ip: string): boolean {
   const now = Date.now();
-  const windowMs = 60 * 1000;
+  const windowMs = 60000;
   if (!rateLimitMap.has(ip)) rateLimitMap.set(ip, []);
   const timestamps = rateLimitMap.get(ip)!.filter((t: number) => now - t < windowMs);
   if (timestamps.length >= RATE_LIMIT) return false;
@@ -81,66 +79,49 @@ function log(level: string, message: any, meta?: any) {
 
 function cleanObject(obj: Record<string, any>) {
   return Object.fromEntries(
-    Object.entries(obj).filter(([_, v]) =>
-      Array.isArray(v) ? v.filter(Boolean).length > 0 : v !== undefined && v !== null && v !== ""
-    )
+    Object.entries(obj).filter(([_, v]) => Array.isArray(v) ? v.filter(Boolean).length > 0 : v !== undefined && v !== null && v !== "")
   );
 }
 
-// ✳️ MELHORIA 4: Proteção contra cookies malformados
 function getCookie(header: string | undefined, name: string): string | undefined {
   if (!header) return undefined;
-  
   try {
     const match = header.match(new RegExp(`${name}=([^;]+)`));
     const value = match?.[1];
-    
-    // Validação básica do formato do cookie
-    if (value && value.length > 0 && value.length < 1000) {
-      return value;
-    }
+    if (value && value.length > 0 && value.length < 1000) return value;
   } catch (error) {
     log("warn", `Cookie malformado para ${name}`, { error: error.message });
   }
-  
   return undefined;
 }
 
-// ✳️ MELHORIA 5: Enriquecimento invisível de contexto
 function generateSessionId(ip: string, userAgent: string): string {
-  const hash = require('crypto').createHash('sha256');
-  hash.update(`${ip}_${userAgent}_${Math.floor(Date.now() / (1000 * 60 * 60))}`); // Hash por hora
-  return hash.digest('hex').substring(0, 16);
+  const hash = require("crypto").createHash("sha256");
+  hash.update(`${ip}_${userAgent}_${Math.floor(Date.now() / (1000 * 60 * 60))}`);
+  return hash.digest("hex").substring(0, 16);
 }
 
 function validateEvent(event: any): { isValid: boolean; errors: string[] } {
   const errors: string[] = [];
-  
   if (!event.event_name) {
     errors.push("event_name é obrigatório");
     return { isValid: false, errors };
   }
-
   const validation = EVENT_VALIDATION[event.event_name as keyof typeof EVENT_VALIDATION];
   if (!validation) {
     errors.push(`Tipo de evento '${event.event_name}' não é suportado`);
     return { isValid: false, errors };
   }
-
-  // Verificar campos obrigatórios
   validation.required.forEach(field => {
     if (!event.user_data?.[field] && !event[field]) {
       errors.push(`Campo obrigatório '${field}' não encontrado para evento ${event.event_name}`);
     }
   });
-
-  // Verificar campos proibidos
   validation.forbidden.forEach(field => {
     if (event.user_data?.[field] || event[field]) {
       errors.push(`Campo '${field}' não deve ser enviado para evento ${event.event_name}`);
     }
   });
-
   return { isValid: errors.length === 0, errors };
 }
 
@@ -152,169 +133,75 @@ function persistFailedEvent(event: any, error: any) {
       error: error.message || error,
       retry_count: 0
     };
-
     const logPath = path.join(process.cwd(), "failed-events.log");
     fs.appendFileSync(logPath, JSON.stringify(failedEvent) + "\n");
-    
-    log("warn", "Evento falhou e foi persistido para reprocessamento", { 
-      event_name: event.event_name, 
-      error: error.message 
-    });
+    log("warn", "Evento falhou e foi persistido para reprocessamento", { event_name: event.event_name, error: error.message });
   } catch (persistError) {
     log("error", "Erro ao persistir evento falhado", persistError);
   }
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // CORS dinâmico
   const origin = req.headers.origin;
-  if (origin && ALLOWED_ORIGINS.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  }
-  
+  if (origin && ALLOWED_ORIGINS.includes(origin)) res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Session-ID");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "no-referrer");
   res.setHeader("X-Robots-Tag", "noindex, nofollow");
-
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
-  
-  if (req.method !== "POST") {
-    return res.status(405).json({ 
-      error: "Método não permitido", 
-      allowed_methods: ["POST", "OPTIONS"] 
-    });
-  }
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "Método não permitido", allowed_methods: ["POST", "OPTIONS"] });
 
   const startTime = Date.now();
   const ip = req.headers["x-forwarded-for"]?.toString() || req.socket.remoteAddress || "unknown";
   const userAgent = req.headers["user-agent"] || "";
-  
-  log("info", "Requisição recebida", { 
-    ip, 
-    userAgent,
-    contentLength: req.headers["content-length"]
-  });
 
-  if (!rateLimit(ip)) {
-    log("warn", "Rate limit excedido", { ip });
-    return res.status(429).json({ 
-      error: "Limite de requisições excedido", 
-      retry_after: 60 
-    });
-  }
+  log("info", "Requisição recebida", { ip, userAgent, contentLength: req.headers["content-length"] });
+  if (!rateLimit(ip)) return res.status(429).json({ error: "Limite de requisições excedido", retry_after: 60 });
 
   try {
     const { data, pixel_id, test_event_code } = req.body;
-    
-    // Validação do payload
-    if (!Array.isArray(data) || data.length === 0) {
-      return res.status(400).json({ 
-        error: "Payload inválido", 
-        details: "data deve ser um array não vazio" 
-      });
-    }
-    
-    if (data.length > 20) {
-      return res.status(400).json({ 
-        error: "Payload muito grande", 
-        details: "Máximo 20 eventos por requisição" 
-      });
-    }
-
-    // Validação de tamanho do payload
-    const payloadSize = Buffer.byteLength(JSON.stringify(req.body));
-    if (payloadSize > 1024 * 1024) { // 1MB
-      return res.status(413).json({ 
-        error: "Payload muito grande", 
-        details: "Máximo 1MB por requisição" 
-      });
-    }
+    if (!Array.isArray(data) || data.length === 0) return res.status(400).json({ error: "Payload inválido", details: "data deve ser um array não vazio" });
+    if (data.length > 20) return res.status(400).json({ error: "Payload muito grande", details: "Máximo 20 eventos por requisição" });
+    if (Buffer.byteLength(JSON.stringify(req.body)) > 1024 * 1024) return res.status(413).json({ error: "Payload muito grande", details: "Máximo 1MB por requisição" });
 
     const pixelId = pixel_id || "2528271940857156";
     const accessToken = process.env.META_ACCESS_TOKEN || "EAAQfmxkTTZCcBPNmwPw6SyHeo5Gt7YzTf5OQGgxAqiZBQRgQoIL1aWAVcynfSxaB7Pvpl7JZBH8kvqSTU2cMolfBLVP9LWbZCI7cdgwpcjSlf40lLndmyJMfiDNEFcMaRURGBXvUE5Fw0hf0j1w5kMprPz13IdRZBWBppfdWnLydkRicmm3BUejkHoUEwWAZDZD";
+
     const seenEventIds = new Set();
     const validatedEvents: any[] = [];
-
-    // ✳️ MELHORIA 2: Fallback de fbc/fbp dos cookies manualmente
     const fbpHeader = getCookie(req.headers.cookie, "_fbp");
     const fbcHeader = getCookie(req.headers.cookie, "_fbc");
-    
-    // ✳️ MELHORIA 5: Session ID persistente
     const sessionId = req.headers["x-session-id"] || generateSessionId(ip, userAgent);
 
-    // Processar e validar cada evento
     for (const event of data) {
-      // Gerar event_id se não existir
-      if (!event.event_id) {
-        event.event_id = "evt_" + Date.now() + "_" + Math.random().toString(36).substring(2, 10);
-      }
-      
-      // Deduplicação
-      if (seenEventIds.has(event.event_id)) {
-        log("warn", "Evento duplicado ignorado", { event_id: event.event_id });
-        continue;
-      }
+      if (!event.event_id) event.event_id = "evt_" + Date.now() + "_" + Math.random().toString(36).substring(2, 10);
+      if (seenEventIds.has(event.event_id)) continue;
       seenEventIds.add(event.event_id);
 
-      // Validação específica do evento
       const validation = validateEvent(event);
-      if (!validation.isValid) {
-        log("error", "Evento inválido", { 
-          event_name: event.event_name, 
-          errors: validation.errors 
-        });
-        continue;
-      }
+      if (!validation.isValid) continue;
 
-      // Preencher campos técnicos
       if (!event.user_data) event.user_data = {};
       event.user_data.client_ip_address = ip;
       event.user_data.client_user_agent = userAgent;
-      
-      // ✳️ MELHORIA 2: Fallback de cookies com proteção
-      if (!event.user_data.fbp) {
-        event.user_data.fbp = fbpHeader || req.cookies?._fbp;
-      }
-      if (!event.user_data.fbc) {
-        event.user_data.fbc = fbcHeader || req.cookies?._fbc;
-      }
+      if (!event.user_data.fbp) event.user_data.fbp = fbpHeader || req.cookies?._fbp;
+      if (!event.user_data.fbc) event.user_data.fbc = fbcHeader || req.cookies?._fbc;
 
-      // ✳️ MELHORIA 1: Suporte a múltiplos external_id
       if (event.event_name === "Lead") {
         const externalIds: string[] = [];
-        
-        // Adicionar external_id original se existir
         if (event.user_data.external_id) {
-          if (Array.isArray(event.user_data.external_id)) {
-            externalIds.push(...event.user_data.external_id);
-          } else {
-            externalIds.push(event.user_data.external_id);
-          }
+          if (Array.isArray(event.user_data.external_id)) externalIds.push(...event.user_data.external_id);
+          else externalIds.push(event.user_data.external_id);
         }
-        
-        // Adicionar session_id como external_id adicional
-        if (sessionId) {
-          externalIds.push(sessionId);
-        }
-        
-        // Remover duplicatas e manter apenas valores válidos
+        if (sessionId) externalIds.push(sessionId);
         const uniqueIds = [...new Set(externalIds.filter(id => id && id.length > 0))];
-        
-        if (uniqueIds.length > 0) {
-          event.user_data.external_id = uniqueIds.length === 1 ? uniqueIds[0] : uniqueIds;
-        }
+        if (uniqueIds.length > 0) event.user_data.external_id = uniqueIds.length === 1 ? uniqueIds[0] : uniqueIds;
       }
 
-      // ✳️ MELHORIA 3: Page URL automática mesmo sem referer
       if (!event.event_source_url) {
-        event.event_source_url = req.headers.referer || 
-                                req.headers["x-page-url"] || 
-                                "https://www.digitalpaisagismo.com.br";
+        event.event_source_url = req.headers.referer || req.headers["x-page-url"] || "https://www.digitalpaisagismo.com.br";
       }
 
       event.action_source = "website";
@@ -324,30 +211,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       validatedEvents.push(event);
     }
 
-    if (validatedEvents.length === 0) {
-      return res.status(400).json({ 
-        error: "Nenhum evento válido encontrado" 
-      });
-    }
+    if (validatedEvents.length === 0) return res.status(400).json({ error: "Nenhum evento válido encontrado" });
 
-    log("info", "Eventos processados", { 
-      total: data.length, 
+    log("info", "Eventos processados", {
+      total: data.length,
       valid: validatedEvents.length,
       invalid: data.length - validatedEvents.length,
       sessionId,
-      fbpFound: !!fbpHeader,
-      fbcFound: !!fbcHeader
+      fbpSent: validatedEvents[0]?.user_data?.fbp,
+      fbcSent: validatedEvents[0]?.user_data?.fbc
     });
 
     const controller = new AbortController();
     const timeoutMs = parseInt(process.env.CAPI_TIMEOUT_MS || "8000", 10);
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-    const payload = JSON.stringify({ 
-      data: validatedEvents, 
-      ...(test_event_code && { test_event_code }) 
-    });
-    
+    const payload = JSON.stringify({ data: validatedEvents, ...(test_event_code && { test_event_code }) });
     const shouldCompress = Buffer.byteLength(payload) > 2048;
     const body: Buffer | string = shouldCompress ? zlib.gzipSync(payload) : payload;
 
@@ -355,30 +234,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       "Content-Type": "application/json",
       "Connection": "keep-alive",
       "User-Agent": "DigitalPaisagismo-CAPI-Proxy/1.0",
-      ...(shouldCompress && { "Content-Encoding": "gzip" }),
+      ...(shouldCompress && { "Content-Encoding": "gzip" })
     };
 
     try {
-      log("info", "Enviando para Meta", { 
-        pixelId, 
-        eventCount: validatedEvents.length,
-        compressed: shouldCompress,
-        payloadSize: Buffer.byteLength(payload),
-        sessionId
-      });
-
       const response = await fetch(`https://graph.facebook.com/v18.0/${pixelId}/events?access_token=${accessToken}`, {
         method: "POST",
         headers,
         body,
-        signal: controller.signal,
+        signal: controller.signal
       });
-      
       clearTimeout(timeout);
       const json = await response.json();
       const responseTime = Date.now() - startTime;
 
-      log("info", "Resposta da Meta", { 
+      log("info", "Resposta da Meta", {
         status: response.status,
         responseTime,
         eventsReceived: json.events_received,
@@ -387,20 +257,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
 
       if (!response.ok) {
-        log("error", "Erro da Meta", { 
-          status: response.status, 
-          response: json,
-          events: validatedEvents.map(e => ({ name: e.event_name, id: e.event_id }))
-        });
-        
-        // Persistir eventos falhados
         validatedEvents.forEach(event => persistFailedEvent(event, json));
-        
-        return res.status(response.status).json({ 
-          error: "Erro da Meta", 
-          details: json,
-          events_processed: validatedEvents.length
-        });
+        return res.status(response.status).json({ error: "Erro da Meta", details: json, events_processed: validatedEvents.length });
       }
 
       res.status(200).json({
@@ -413,41 +271,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           timestamp: new Date().toISOString()
         }
       });
-      
+
     } catch (error: any) {
       clearTimeout(timeout);
-      
-      if (error.name === 'AbortError') {
-        log("error", "Timeout ao enviar para Meta", { timeoutMs });
-        return res.status(408).json({ 
-          error: "Timeout ao enviar evento para a Meta",
-          timeout_ms: timeoutMs
-        });
-      }
-      
-      log("error", "Erro ao enviar para Meta", { 
-        error: error.message,
-        events: validatedEvents.map(e => ({ name: e.event_name, id: e.event_id }))
-      });
-      
-      // Persistir eventos falhados
       validatedEvents.forEach(event => persistFailedEvent(event, error));
-      
-      return res.status(500).json({ 
-        error: "Erro ao enviar evento para a Meta",
-        details: error.message
-      });
+      return res.status(500).json({ error: "Erro ao enviar evento para a Meta", details: error.message });
     }
-    
   } catch (error: any) {
-    log("error", "Erro inesperado", { 
-      error: error.message,
-      stack: error.stack
-    });
-    
-    res.status(500).json({ 
-      error: "Erro inesperado ao processar evento",
-      details: process.env.NODE_ENV === "development" ? error.message : "Erro interno"
-    });
+    log("error", "Erro inesperado", { error: error.message, stack: error.stack });
+    res.status(500).json({ error: "Erro inesperado ao processar evento", details: process.env.NODE_ENV === "development" ? error.message : "Erro interno" });
   }
 }
